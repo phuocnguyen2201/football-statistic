@@ -1,0 +1,13 @@
+[Unit]
+Description=Football stats refresh, Monday and Friday 01:00 (Europe/London)
+
+[Timer]
+# Explicit timezone, independent of the Pi's clock setting. Change if needed.
+OnCalendar=Mon,Fri *-*-* 01:00:00 Europe/London
+# If the Pi was off at 01:00, run as soon as it boots.
+Persistent=true
+RandomizedDelaySec=5min
+Unit=football-refresh.service
+
+[Install]
+WantedBy=timers.target

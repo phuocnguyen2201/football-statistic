@@ -18,6 +18,54 @@ use sqlx::PgPool;
 #[derive(Clone)]
 struct AppState {
     pool: PgPool,
+    pi: Option<PiAdmin>,
+}
+
+/// The Pi worker's admin API behind Cloudflare Tunnel + Access (optional:
+/// without it the Pi still picks up queued requests within 60s).
+#[derive(Clone)]
+struct PiAdmin {
+    http: reqwest::Client,
+    url: String,
+    token: String,
+    access_id: String,
+    access_secret: String,
+}
+
+impl PiAdmin {
+    fn from_env() -> Option<Self> {
+        let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
+        Some(Self {
+            http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(5))
+                .build()
+                .ok()?,
+            url: var("PI_ADMIN_URL")?,
+            token: var("WORKER_ADMIN_TOKEN")?,
+            access_id: var("CF_ACCESS_CLIENT_ID")?,
+            access_secret: var("CF_ACCESS_CLIENT_SECRET")?,
+        })
+    }
+
+    /// Fire and forget: the queued row is the source of truth.
+    fn wake(&self) {
+        let pi = self.clone();
+        tokio::spawn(async move {
+            let res = pi
+                .http
+                .post(format!("{}/refresh", pi.url.trim_end_matches('/')))
+                .bearer_auth(&pi.token)
+                .header("CF-Access-Client-Id", &pi.access_id)
+                .header("CF-Access-Client-Secret", &pi.access_secret)
+                .send()
+                .await;
+            match res {
+                Ok(r) if r.status().is_success() => {}
+                Ok(r) => tracing::warn!(status = %r.status(), "Pi admin API refused the wake-up"),
+                Err(e) => tracing::warn!(error = %e, "Pi admin API unreachable; it will poll"),
+            }
+        });
+    }
 }
 
 #[tokio::main]
@@ -45,7 +93,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/team/{id}", get(team))
         .route("/h2h", get(h2h::page))
         .route("/refresh", post(refresh))
-        .with_state(Arc::new(AppState { pool }));
+        .with_state(Arc::new(AppState {
+            pool,
+            pi: PiAdmin::from_env(),
+        }));
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     tracing::info!("listening on http://{bind}");
@@ -261,7 +312,6 @@ struct RefreshFragment {
 
 /// Queue a refresh. Requires the HX-Request header (a cross-site form cannot
 /// set it) and refuses while a request is already pending or running.
-// shortcut: only queues the row; the Pi admin API call via Cloudflare Tunnel comes in Phase 4.
 async fn refresh(
     State(st): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -282,6 +332,9 @@ async fn refresh(
         )
         .fetch_one(&st.pool)
         .await?;
+        if let Some(pi) = &st.pi {
+            pi.wake();
+        }
         format!("Refresh queued (#{id}).")
     };
     Ok(Html(RefreshFragment { message }.render()?).into_response())

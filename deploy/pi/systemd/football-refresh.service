@@ -1,0 +1,17 @@
+[Unit]
+Description=Football stats scheduled refresh (one run)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=football
+Group=football
+EnvironmentFile=/etc/football-statistics/worker.env
+WorkingDirectory=/var/lib/football-statistics
+ExecStart=/opt/football-statistics/bin/worker run
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/football-statistics

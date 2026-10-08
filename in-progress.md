@@ -20,6 +20,15 @@ Started but not finished, as of 2026-10-08.
 - [ ] Run against the loaded database and fix whatever the real data exposes
 - [ ] "Refresh now" only inserts a `refresh_request` row; the call to the Pi admin API is still missing (Phase 4)
 
+## Pi worker (`crates/worker`, `deploy/pi/`)
+- [x] `worker serve`: polls `refresh_request` every 60s, admin API (`POST /refresh`, `GET /health`)
+- [x] `worker run` + systemd timer Mon/Fri 01:00 Europe/London, `Persistent=true`
+- [x] Advisory lock against overlapping runs; stale `running` rows marked failed
+- [x] First job: football-data.org squads (Rust port of the SQL import rules)
+- [x] Website "Refresh now" also wakes the Pi through Cloudflare Tunnel + Access (if configured)
+- [ ] Deploy on the Pi: follow `deploy/pi/README.md` (Tailscale, build, env file, systemd, cloudflared)
+- [ ] First real run against Supabase; check `ingest_run` and the run message for unmapped teams
+
 ## API-Football squad pull (`crates/probe`)
 - Stopped by the daily quota guard partway through La Liga (season 2024).
   Resume: `cargo run -p probe -- --season 2024 --date 2026-10-08`

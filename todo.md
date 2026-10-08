@@ -35,11 +35,9 @@ Not started yet, as of 2026-10-08. Grouped by the phases in `CLAUDE.md`.
   football-data.org players are separate rows
 
 ## Phase 4: worker on the Raspberry Pi
-- [ ] `refresh_request` queue consumer (poll every 60s, lock against overlapping runs)
-- [ ] Mon + Fri 01:00 systemd timer (`Persistent=true`, explicit timezone)
-- [ ] Admin API behind Cloudflare Tunnel + Access; wire the "Refresh now" button to it
-- [ ] Per-source rate limiter, 429 backoff, 80% quota guard for every source
-- [ ] Tailscale access, deploy docs
+- [ ] More worker jobs: football-data.co.uk CSV download + import, openfootball CL,
+  API-Football (with its 80% daily quota guard)
+- [ ] Cloudflare cache purge after each run (Phase 5)
 
 ## Phase 5: website polish and hosting
 - [ ] Cloudflare caching + cache purge after each worker run

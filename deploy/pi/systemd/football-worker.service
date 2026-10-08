@@ -1,0 +1,23 @@
+[Unit]
+Description=Football stats worker (refresh queue poller + admin API)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=football
+Group=football
+EnvironmentFile=/etc/football-statistics/worker.env
+WorkingDirectory=/var/lib/football-statistics
+ExecStart=/opt/football-statistics/bin/worker serve
+# The worker shuts down cleanly on SIGINT.
+KillSignal=SIGINT
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/football-statistics
+
+[Install]
+WantedBy=multi-user.target
