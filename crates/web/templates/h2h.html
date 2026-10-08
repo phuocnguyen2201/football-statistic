@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Head-to-head · Football Stats{% endblock %}
+{% block content %}
+<h1>Head-to-head</h1>
+<p class="muted">Pick two teams to see every meeting in the database.</p>
+
+<form class="h2h-form" method="get" action="/h2h">
+  <label>
+    <span>Team A</span>
+    <select name="a" required>
+      <option value="" disabled{% if a_id == 0 %} selected{% endif %}>Choose a team</option>
+      {% for (league, list) in groups %}
+      <optgroup label="{{ league }}">
+        {% for t in list %}<option value="{{ t.id }}"{% if t.id == a_id %} selected{% endif %}>{{ t.name }}</option>
+        {% endfor %}
+      </optgroup>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    <span>Team B</span>
+    <select name="b" required>
+      <option value="" disabled{% if b_id == 0 %} selected{% endif %}>Choose a team</option>
+      {% for (league, list) in groups %}
+      <optgroup label="{{ league }}">
+        {% for t in list %}<option value="{{ t.id }}"{% if t.id == b_id %} selected{% endif %}>{{ t.name }}</option>
+        {% endfor %}
+      </optgroup>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit">Compare</button>
+</form>
+
+{% if let Some(e) = error %}<p class="notice" role="alert">{{ e }}</p>{% endif %}
+
+{% if let Some(r) = result %}
+<h2>{{ r.a_name }} vs {{ r.b_name }}</h2>
+{% if r.played == 0 %}
+<p class="notice">No meetings between these teams in the database yet.</p>
+{% else %}
+<div class="tiles">
+  <div class="tile"><strong>{{ r.a_wins }}</strong><span>{{ r.a_name }} wins · {{ r.a_win_pct }}</span></div>
+  <div class="tile"><strong>{{ r.draws }}</strong><span>Draws · {{ r.draw_pct }}</span></div>
+  <div class="tile"><strong>{{ r.b_wins }}</strong><span>{{ r.b_name }} wins · {{ r.b_win_pct }}</span></div>
+  <div class="tile"><strong>{{ r.a_goals }}–{{ r.b_goals }}</strong><span>Goals · {{ r.avg_goals }} per match</span></div>
+</div>
+<p class="muted">{{ r.played }} meetings.</p>
+
+<h2>Goals markets</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col">Market</th><th scope="col">Matches</th><th scope="col">Rate</th></tr></thead>
+  <tbody>
+    {% for m in r.markets %}
+    <tr><td>{{ m.label }}</td><td class="num">{{ m.count }}/{{ r.played }}</td><td class="num">{{ m.pct }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% if !r.stats.is_empty() %}
+<h2>Match stats (average per match)</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col">Stat</th><th scope="col">{{ r.a_name }}</th><th scope="col">Total</th><th scope="col">{{ r.b_name }}</th><th scope="col">Based on</th></tr></thead>
+  <tbody>
+    {% for s in r.stats %}
+    <tr><td>{{ s.label }}</td><td class="num">{{ s.a }}</td><td class="num">{{ s.total }}</td><td class="num">{{ s.b }}</td><td class="muted">{{ s.sample }} matches</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+<h2>Meetings</h2>
+<div class="scroll">
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Date</th><th scope="col">Competition</th><th scope="col">Match</th><th scope="col">HT</th>
+      {% if r.show_corners %}<th scope="col">Corners</th>{% endif %}
+      {% if r.show_cards %}<th scope="col">Cards</th>{% endif %}
+      <th scope="col"><abbr title="Result for {{ r.a_name }}">{{ r.a_name }}</abbr></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for m in r.matches %}
+    <tr>
+      <td class="nowrap">{{ m.date }}</td>
+      <td class="muted">{{ m.competition }}</td>
+      <td>{{ m.home }} <strong>{{ m.score }}</strong> {{ m.away }}</td>
+      <td class="num">{{ m.ht }}</td>
+      {% if r.show_corners %}<td class="num">{% if let Some(c) = m.corners %}{{ c }}{% else %}–{% endif %}</td>{% endif %}
+      {% if r.show_cards %}<td class="nowrap">{% if let Some(c) = m.cards %}{{ c }}{% else %}–{% endif %}</td>{% endif %}
+      <td><span class="badge {{ m.result }}">{{ m.result }}</span></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

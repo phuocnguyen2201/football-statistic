@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ team.name }} · Football Stats{% endblock %}
+{% block content %}
+<p><a href="/">← All leagues</a></p>
+<div class="team-head">
+  {% if let Some(logo) = team.logo_url %}<img src="{{ logo }}" alt="{{ team.name }} crest">{% endif %}
+  <div>
+    <h1>{{ team.name }}</h1>
+    <p class="muted">
+      {% if let Some(c) = team.country %}{{ c }}{% endif %}
+      {% if let Some(f) = team.founded %} · Founded {{ f }}{% endif %}
+      {% if let Some(v) = team.venue_name %} · {{ v }}{% if let Some(city) = team.venue_city %}, {{ city }}{% endif %}{% if let Some(cap) = team.venue_capacity %} ({{ cap }}){% endif %}{% endif %}
+    </p>
+  </div>
+</div>
+
+<p><a href="/h2h?a={{ id }}">Compare head-to-head →</a></p>
+
+{% if groups.is_empty() %}
+<p>No squad loaded yet.</p>
+{% endif %}
+{% for (position, players) in groups %}
+<h2>{{ position }}s</h2>
+<table>
+  <thead><tr><th scope="col">#</th><th scope="col">Player</th><th scope="col">Age</th></tr></thead>
+  <tbody>
+    {% for p in players %}
+    <tr>
+      <td class="num">{% if let Some(n) = p.shirt_number %}{{ n }}{% else %}–{% endif %}</td>
+      <td>{% if let Some(photo) = p.photo_url %}<img src="{{ photo }}" alt="" loading="lazy">{% endif %}{{ p.name }}</td>
+      <td class="num">{% if let Some(a) = p.age %}{{ a }}{% else %}–{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endfor %}
+{% endblock %}

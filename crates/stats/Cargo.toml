@@ -1,0 +1,8 @@
+[package]
+name = "stats"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "Pure stats functions (no I/O): head-to-head, form, goals markets"
+
+[dependencies]

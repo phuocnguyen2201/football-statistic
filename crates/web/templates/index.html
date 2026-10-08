@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Leagues</h1>
+<p class="muted">Statistics for information only. This site does not take bets.</p>
+<ul class="grid">
+  {% for l in leagues %}
+  <li>
+    <a class="card" href="/league/{{ l.code }}">
+      <span>
+        <strong>{{ l.name }}</strong>
+        <small>{{ l.country }}{% if let Some(s) = l.season_label %} · {{ s }}{% endif %} · {{ l.teams }} teams</small>
+      </span>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}

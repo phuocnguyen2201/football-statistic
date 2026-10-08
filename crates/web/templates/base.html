@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Football Stats{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
+  <style>
+    :root {
+      --bg: #f7f7f5; --surface: #ffffff; --text: #1b1d1f; --muted: #5f6368;
+      --border: #e3e3df; --accent: #1f6f43; --accent-text: #ffffff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #121416; --surface: #1b1e21; --text: #e8eaed; --muted: #9aa0a6;
+        --border: #2c3035; --accent: #4cb782; --accent-text: #0d1a12;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text);
+           font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    header { background: var(--surface); border-bottom: 1px solid var(--border); }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 0 16px; }
+    header .wrap { display: flex; align-items: center; justify-content: space-between;
+                   gap: 12px; min-height: 56px; flex-wrap: wrap; }
+    header a.brand { font-weight: 700; color: var(--text); text-decoration: none; }
+    main { padding: 24px 0 48px; }
+    a { color: var(--accent); }
+    h1 { font-size: 1.6rem; margin: 0 0 4px; }
+    h2 { font-size: 1.1rem; margin: 28px 0 8px; }
+    .muted { color: var(--muted); }
+    .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); padding: 0; list-style: none; }
+    .card { display: flex; gap: 12px; align-items: center; background: var(--surface);
+            border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+            color: var(--text); text-decoration: none; }
+    a.card:hover, a.card:focus-visible { border-color: var(--accent); }
+    .card img { width: 36px; height: 36px; object-fit: contain; flex: none; }
+    .card strong { display: block; }
+    .card small { color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; background: var(--surface);
+            border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+    th { font-size: .85rem; color: var(--muted); font-weight: 600; }
+    tr:last-child td { border-bottom: 0; }
+    td.num { width: 3.5rem; font-variant-numeric: tabular-nums; color: var(--muted); }
+    td img { width: 28px; height: 28px; border-radius: 50%; vertical-align: middle; margin-right: 8px; }
+    .team-head { display: flex; gap: 16px; align-items: center; }
+    .team-head img { width: 64px; height: 64px; object-fit: contain; }
+    button { background: var(--accent); color: var(--accent-text); border: 0; border-radius: 8px;
+             padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+    button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .refresh { display: flex; gap: 10px; align-items: center; }
+    .nav { display: flex; gap: 16px; align-items: baseline; }
+    .h2h-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 16px 0; }
+    .h2h-form label { display: flex; flex-direction: column; gap: 4px; flex: 1 1 220px; font-size: .9rem; color: var(--muted); }
+    select { font: inherit; padding: 8px; border-radius: 8px; border: 1px solid var(--border);
+             background: var(--surface); color: var(--text); }
+    .tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+    .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+    .tile strong { display: block; font-size: 1.6rem; font-variant-numeric: tabular-nums; }
+    .tile span { color: var(--muted); font-size: .9rem; }
+    .notice { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent);
+              border-radius: 8px; padding: 10px 14px; }
+    .scroll { overflow-x: auto; }
+    .nowrap { white-space: nowrap; }
+    .badge { display: inline-block; min-width: 1.8em; text-align: center; border-radius: 6px;
+             padding: 1px 6px; font-weight: 700; font-size: .85rem; }
+    .badge.W { background: #1f6f43; color: #fff; }
+    .badge.D { background: #6b6f75; color: #fff; }
+    .badge.L { background: #b3261e; color: #fff; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <nav class="nav"><a class="brand" href="/">Football Stats</a> <a href="/h2h">Head-to-head</a></nav>
+      <div class="refresh">
+        <span id="refresh-status" class="muted" role="status" aria-live="polite"></span>
+        <button hx-post="/refresh" hx-target="#refresh-status">Refresh now</button>
+      </div>
+    </div>
+  </header>
+  <main class="wrap">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

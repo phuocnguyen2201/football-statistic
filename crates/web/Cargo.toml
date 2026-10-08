@@ -1,0 +1,18 @@
+[package]
+name = "web"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "Server-rendered site (Axum + Askama + HTMX), read-only DB role"
+
+[dependencies]
+anyhow.workspace = true
+askama.workspace = true
+axum.workspace = true
+dotenvy.workspace = true
+serde.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+stats = { path = "../stats" }

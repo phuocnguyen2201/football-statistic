@@ -1,0 +1,16 @@
+[package]
+name = "ingest"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "Loads raw source responses from ./raw/ into Postgres (worker role)"
+
+[dependencies]
+anyhow.workspace = true
+dotenvy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

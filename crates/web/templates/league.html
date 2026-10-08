@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}{{ competition.name }} · Football Stats{% endblock %}
+{% block content %}
+<p><a href="/">← All leagues</a></p>
+<h1>{{ competition.name }}</h1>
+<p class="muted">{{ competition.country }}{% if let Some(s) = competition.season_label %} · {{ s }} season{% endif %}</p>
+{% if teams.is_empty() %}
+<p>No teams loaded yet.</p>
+{% else %}
+<ul class="grid">
+  {% for t in teams %}
+  <li>
+    <a class="card" href="/team/{{ t.id }}">
+      {% if let Some(logo) = t.logo_url %}<img src="{{ logo }}" alt="" loading="lazy">{% endif %}
+      <span>
+        <strong>{{ t.name }}</strong>
+        <small>{% if let Some(v) = t.venue_name %}{{ v }}{% if let Some(c) = t.venue_city %}, {{ c }}{% endif %} · {% endif %}{{ t.players }} players</small>
+      </span>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}
