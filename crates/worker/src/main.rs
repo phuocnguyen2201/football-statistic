@@ -1,8 +1,8 @@
 //! Raspberry Pi worker.
 //!
 //! `worker serve`  long-running (systemd service): polls `refresh_request`
-//!                 every 60s and serves the admin API for the site's
-//!                 "Refresh now" button (reached via Cloudflare Tunnel).
+//!                 every 60s, so the site's "Refresh now" button (which only
+//!                 inserts a row) is picked up within a minute.
 //! `worker run`    one refresh now (systemd timer, Mon + Fri 01:00).
 //!
 //! A Postgres advisory lock guarantees only one refresh runs at a time, across
@@ -12,18 +12,11 @@ mod fdo;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::IntoResponse;
-use axum::routing::{get, post};
-use axum::{Json, Router};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
-use tokio::sync::Notify;
 
 const USAGE: &str = "usage: worker serve | worker run";
 /// Advisory lock key shared by every refresh ("foot" in ASCII).
@@ -34,8 +27,6 @@ pub struct Config {
     db_url: String,
     fdo_key: String,
     raw_dir: PathBuf,
-    admin_bind: String,
-    admin_token: Option<String>,
 }
 
 impl Config {
@@ -52,8 +43,6 @@ impl Config {
             db_url,
             fdo_key,
             raw_dir: std::env::var("RAW_DIR").map_or_else(|_| PathBuf::from("raw"), PathBuf::from),
-            admin_bind: std::env::var("ADMIN_BIND").unwrap_or_else(|_| "127.0.0.1:8787".into()),
-            admin_token: std::env::var("WORKER_ADMIN_TOKEN").ok(),
         })
     }
 }
@@ -88,7 +77,7 @@ async fn run_cli() -> Result<()> {
     if cmd != "serve" && cmd != "run" {
         bail!(USAGE);
     }
-    let cfg = Arc::new(Config::from_env()?);
+    let cfg = Config::from_env()?;
     let pool = PgPoolOptions::new()
         .max_connections(3)
         .connect(&cfg.db_url)
@@ -96,7 +85,7 @@ async fn run_cli() -> Result<()> {
     if cmd == "run" {
         cycle(&pool, &cfg, Trigger::Schedule).await
     } else {
-        serve(pool, cfg).await
+        serve(&pool, &cfg).await
     }
 }
 
@@ -162,116 +151,23 @@ async fn locked_cycle(pool: &PgPool, cfg: &Config, trigger: Trigger) -> Result<(
 
 // --------------------------------------------------------------- serve mode
 
-#[derive(Clone)]
-struct AppState {
-    pool: PgPool,
-    token: Arc<str>,
-    wake: Arc<Notify>,
-}
-
-async fn serve(pool: PgPool, cfg: Arc<Config>) -> Result<()> {
-    let token =
-        cfg.admin_token.clone().filter(|t| t.len() >= 32).context(
-            "WORKER_ADMIN_TOKEN must be set to at least 32 characters for `worker serve`",
-        )?;
-    let wake = Arc::new(Notify::new());
-
-    let poller = {
-        let (pool, cfg, wake) = (pool.clone(), cfg.clone(), wake.clone());
-        tokio::spawn(async move {
-            loop {
-                if let Err(e) = cycle(&pool, &cfg, Trigger::Queue).await {
-                    tracing::error!("refresh failed: {e:#}");
-                }
-                tokio::select! {
-                    _ = tokio::time::sleep(POLL_EVERY) => {}
-                    _ = wake.notified() => {}
-                }
+/// Poll the queue until stopped (systemd sends SIGINT: KillSignal=SIGINT).
+async fn serve(pool: &PgPool, cfg: &Config) -> Result<()> {
+    tracing::info!("polling refresh_request every {}s", POLL_EVERY.as_secs());
+    // Created once so a stop signal that arrives mid-refresh is not lost; the
+    // running refresh finishes before we exit.
+    let stop = tokio::signal::ctrl_c();
+    tokio::pin!(stop);
+    loop {
+        if let Err(e) = cycle(pool, cfg, Trigger::Queue).await {
+            tracing::error!("refresh failed: {e:#}");
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(POLL_EVERY) => {}
+            _ = &mut stop => {
+                tracing::info!("stopping");
+                return Ok(());
             }
-        })
-    };
-
-    let app = Router::new()
-        .route("/health", get(health))
-        .route("/refresh", post(refresh))
-        .with_state(AppState {
-            pool,
-            token: token.into(),
-            wake,
-        });
-    let listener = tokio::net::TcpListener::bind(&cfg.admin_bind).await?;
-    tracing::info!("admin API on http://{}", cfg.admin_bind);
-    // systemd stops the service with SIGINT (KillSignal=SIGINT in the unit).
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            tokio::signal::ctrl_c().await.ok();
-        })
-        .await?;
-    poller.abort();
-    Ok(())
-}
-
-async fn health(State(st): State<AppState>) -> impl IntoResponse {
-    let last: Option<(String, Option<String>)> = sqlx::query_as(
-        "select status, to_char(finished_at at time zone 'utc', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
-         from ingest_run order by id desc limit 1",
-    )
-    .fetch_optional(&st.pool)
-    .await
-    .unwrap_or(None);
-    Json(serde_json::json!({
-        "ok": true,
-        "last_ingest_status": last.as_ref().map(|l| l.0.clone()),
-        "last_ingest_finished_at": last.and_then(|l| l.1),
-    }))
-}
-
-/// Queue a refresh (if none is pending) and start it now instead of at the
-/// next poll. Requires `Authorization: Bearer <WORKER_ADMIN_TOKEN>`.
-async fn refresh(State(st): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
-    let given = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .unwrap_or("");
-    if !constant_time_eq(given.as_bytes(), st.token.as_bytes()) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-    let queued = sqlx::query(
-        "insert into refresh_request (status)
-         select 'pending' where not exists (select 1 from refresh_request where status = 'pending')",
-    )
-    .execute(&st.pool)
-    .await;
-    match queued {
-        Ok(_) => {
-            st.wake.notify_one();
-            (
-                StatusCode::ACCEPTED,
-                Json(serde_json::json!({ "queued": true })),
-            )
-                .into_response()
         }
-        Err(e) => {
-            tracing::error!("queueing refresh: {e:#}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        }
-    }
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn token_comparison() {
-        assert!(constant_time_eq(b"secret-token", b"secret-token"));
-        assert!(!constant_time_eq(b"secret-token", b"secret-tokeN"));
-        assert!(!constant_time_eq(b"secret", b"secret-token"));
-        assert!(!constant_time_eq(b"", b"x"));
     }
 }

@@ -68,6 +68,13 @@
     .badge.W { background: #1f6f43; color: #fff; }
     .badge.D { background: #6b6f75; color: #fff; }
     .badge.L { background: #b3261e; color: #fff; }
+    .two-col { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .two-col h3 { margin: 0 0 8px; font-size: 1rem; }
+    .streaks { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 0; margin: 8px 0 0; }
+    .streaks li { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; }
+    .standings td a { color: var(--text); text-decoration: none; }
+    .standings td a:hover, .standings td a:focus-visible { text-decoration: underline; }
+    .standings td img { width: 20px; height: 20px; border-radius: 0; object-fit: contain; }
   </style>
 </head>
 <body>

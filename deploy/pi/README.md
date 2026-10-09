@@ -4,8 +4,12 @@ The worker is the only thing that writes to the database. On the Pi it runs as:
 
 | Unit | What it does |
 |---|---|
-| `football-worker.service` | `worker serve`: checks `refresh_request` every 60 s, and serves the admin API on `127.0.0.1:8787` |
+| `football-worker.service` | `worker serve`: checks `refresh_request` every 60 s; the website's "Refresh now" button just inserts a row there |
 | `football-refresh.timer` → `football-refresh.service` | `worker run`: a full refresh every Monday and Friday at 01:00 Europe/London |
+
+The Pi only makes outgoing connections (to Supabase and the data APIs). Nothing connects
+in to it, so there's no tunnel, no open port and no admin API to secure. The website can be
+hosted anywhere: it only reads Supabase and adds rows to `refresh_request`.
 
 A Postgres advisory lock makes sure only one refresh runs at a time, even if the timer
 fires while a "Refresh now" run is in progress. A crashed run releases the lock
@@ -77,7 +81,6 @@ sudo nano /etc/football-statistics/worker.env   # fill in the values
 - `WORKER_DATABASE_URL`: the Supabase **Session pooler** connection string (port 5432) for the
   `worker` role. If you haven't given that role a login yet, run this in the SQL editor:
   `alter role worker with login password '...'`.
-- `WORKER_ADMIN_TOKEN`: generate it with `openssl rand -hex 32`. The website needs the same value.
 
 ## 6. Install the systemd units
 
@@ -92,7 +95,7 @@ Check that everything is running:
 ```bash
 systemctl status football-worker
 systemctl list-timers football-refresh.timer   # shows the next Mon/Fri 01:00 run
-curl -s http://127.0.0.1:8787/health            # {"ok":true, "last_ingest_status":...}
+journalctl -u football-worker -n 20            # "polling refresh_request every 60s"
 ```
 
 Run one refresh by hand and follow the log:
@@ -101,39 +104,6 @@ Run one refresh by hand and follow the log:
 sudo systemctl start football-refresh.service
 journalctl -u football-refresh -f
 ```
-
-## 7. Cloudflare Tunnel and Access (for the website's "Refresh now" button)
-
-The website reaches the Pi through a tunnel. Nothing on the Pi is exposed to the internet directly.
-
-```bash
-# Install cloudflared for arm64 by following Cloudflare's Debian/Raspberry Pi instructions, then:
-cloudflared tunnel login
-cloudflared tunnel create football-pi
-cloudflared tunnel route dns football-pi pi-admin.<your-domain>
-sudo mkdir -p /etc/cloudflared
-sudo cp ~/.cloudflared/<TUNNEL_ID>.json /etc/cloudflared/
-sudo cp deploy/pi/cloudflared-config.yml.example /etc/cloudflared/config.yml   # fill in the IDs
-sudo cloudflared service install
-```
-
-Then in the Cloudflare Zero Trust dashboard:
-
-1. **Access → Service Auth → Service Tokens**: create a token, and copy its Client ID and Client Secret.
-2. **Access → Applications**: add a self-hosted application for `pi-admin.<your-domain>` with a
-   policy whose action is **Service Auth** and which includes that service token only.
-
-Finally, add these to the **website's** environment:
-
-```
-PI_ADMIN_URL=https://pi-admin.<your-domain>
-WORKER_ADMIN_TOKEN=<same value as on the Pi>
-CF_ACCESS_CLIENT_ID=<service token id>
-CF_ACCESS_CLIENT_SECRET=<service token secret>
-```
-
-If any of these are missing, the button still works: it queues the request and the Pi
-picks it up within 60 s.
 
 ## Updating
 

@@ -16,11 +16,93 @@
 
 <p><a href="/h2h?a={{ id }}">Compare head-to-head →</a></p>
 
+{% if let Some(st) = stats %}
+<h2>Form</h2>
+<p>
+  {% for x in st.form %}<span class="badge {{ x }}">{{ x }}</span> {% endfor %}
+  <span class="muted">Last {{ st.form.len() }}, newest first · {{ st.form_summary }}</span>
+</p>
+{% if st.streaks.is_empty() %}
+<p class="muted">No current streak of 2+ matches.</p>
+{% else %}
+<ul class="streaks">
+  {% for (label, n) in st.streaks %}<li><strong>{{ n }}</strong> {{ label }}</li>{% endfor %}
+</ul>
+{% endif %}
+
+<h2>{{ st.season }} season</h2>
+<p class="muted">All competitions. Percentages are share of matches.</p>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col"></th><th scope="col">Overall</th><th scope="col">Home</th><th scope="col">Away</th></tr></thead>
+  <tbody>
+    {% for m in st.markets %}
+    <tr><td>{{ m.label }}</td><td class="num">{{ m.all }}</td><td class="num">{{ m.home }}</td><td class="num">{{ m.away }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Recent matches</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col">Date</th><th scope="col">Competition</th><th scope="col"></th><th scope="col">Opponent</th><th scope="col">Score</th><th scope="col"></th><th scope="col"></th></tr></thead>
+  <tbody>
+    {% for r in st.recent %}
+    <tr>
+      <td class="nowrap">{{ r.date }}</td>
+      <td class="muted">{{ r.competition }}</td>
+      <td><abbr title="{% if r.venue == "H" %}Home{% else %}Away{% endif %}">{{ r.venue }}</abbr></td>
+      <td><a href="/team/{{ r.opponent_id }}">{{ r.opponent }}</a></td>
+      <td class="num">{{ r.score }}</td>
+      <td><span class="badge {{ r.result }}">{{ r.result }}</span></td>
+      <td><a href="/h2h?a={{ id }}&amp;b={{ r.opponent_id }}">H2H</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="muted">No matches in the database for this team yet.</p>
+{% endif %}
+
+{% if let Some(first) = players.first() %}
+<h2>Player stats {{ first.season }}</h2>
+<p class="muted">League matches in {{ first.season }}, the latest season our data plan allows; some of these players may have left.</p>
+<div class="scroll">
+<table>
+  <thead>
+    <tr>
+      <th scope="col">Player</th><th scope="col"><abbr title="Appearances">Apps</abbr></th>
+      <th scope="col"><abbr title="Minutes">Min</abbr></th><th scope="col">Goals</th><th scope="col">Assists</th>
+      <th scope="col"><abbr title="Yellow cards">Y</abbr></th><th scope="col"><abbr title="Red cards">R</abbr></th><th scope="col">Rating</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in players %}
+    <tr>
+      <td>{{ p.name }}</td>
+      <td class="num">{% if let Some(v) = p.appearances %}{{ v }}{% else %}–{% endif %}</td>
+      <td class="num">{% if let Some(v) = p.minutes %}{{ v }}{% else %}–{% endif %}</td>
+      <td class="num">{% if let Some(v) = p.goals %}{{ v }}{% else %}–{% endif %}</td>
+      <td class="num">{% if let Some(v) = p.assists %}{{ v }}{% else %}–{% endif %}</td>
+      <td class="num">{% if let Some(v) = p.yellow %}{{ v }}{% else %}–{% endif %}</td>
+      <td class="num">{% if let Some(v) = p.red %}{{ v }}{% else %}–{% endif %}</td>
+      <td class="num">{% if let Some(v) = p.rating %}{{ v }}{% else %}–{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+<h2>Squad</h2>
+
 {% if groups.is_empty() %}
 <p>No squad loaded yet.</p>
 {% endif %}
 {% for (position, players) in groups %}
-<h2>{{ position }}s</h2>
+<h3>{{ position }}s</h3>
 <table>
   <thead><tr><th scope="col">#</th><th scope="col">Player</th><th scope="col">Age</th></tr></thead>
   <tbody>

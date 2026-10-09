@@ -1,5 +1,5 @@
-//! Load API-Football raw responses (teams, squads) from `raw/<date>/` into
-//! Postgres. Idempotent: teams and players are matched through
+//! Load API-Football raw responses (teams, squads, player season stats) from
+//! `raw/<date>/` into Postgres. Idempotent: teams and players are matched through
 //! `team_alias` / `player_alias` on (source, source_key), so reruns update.
 //!
 //! Usage: ingest [RAW_DIR]   (default: newest `raw/<YYYY-MM-DD>` folder)
@@ -74,6 +74,57 @@ struct ApiPlayer {
     number: Option<i16>,
     position: Option<String>,
     photo: Option<String>,
+}
+
+/// One `/players?league&season` page entry.
+#[derive(Debug, Deserialize)]
+struct StatsEntry {
+    player: StatsPlayer,
+    statistics: Vec<StatLine>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StatsPlayer {
+    id: i64,
+    name: String,
+    age: Option<i16>,
+    photo: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StatLine {
+    team: SquadTeam,
+    league: StatsLeague,
+    games: Games,
+    goals: Goals,
+    cards: Cards,
+}
+
+#[derive(Debug, Deserialize)]
+struct StatsLeague {
+    id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Games {
+    /// (sic) API-Football's spelling.
+    appearences: Option<i16>,
+    minutes: Option<i32>,
+    position: Option<String>,
+    rating: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Goals {
+    total: Option<i16>,
+    assists: Option<i16>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Cards {
+    yellow: Option<i16>,
+    yellowred: Option<i16>,
+    red: Option<i16>,
 }
 
 #[tokio::main]
@@ -220,6 +271,95 @@ async fn load(pool: &PgPool, dir: &Path) -> Result<usize> {
         }
     }
     tracing::info!(rows, "squads loaded");
+
+    for path in json_files(&dir.join("players"))? {
+        let name = file_name(&path);
+        let Some((league_id, season)) = parse_players_filename(&name) else {
+            tracing::warn!(file = %name, "unexpected players file name, skipped");
+            continue;
+        };
+        let Some(code) = competition_code(league_id) else {
+            continue;
+        };
+        let season_id: Option<i32> = sqlx::query_scalar(
+            "select s.id from season s join competition c on c.id = s.competition_id
+             where c.code = $1 and s.start_year = $2",
+        )
+        .bind(code)
+        .bind(season)
+        .fetch_optional(pool)
+        .await?;
+        let Some(season_id) = season_id else {
+            tracing::warn!(file = %name, "season not loaded (needs its teams file), skipped");
+            continue;
+        };
+        let page: Envelope<StatsEntry> = read_json(&path)?;
+
+        let mut tx = pool.begin().await?;
+        let (mut loaded, mut unknown_team) = (0, 0);
+        for entry in &page.response {
+            // An entry can also list cups, or another league after a transfer.
+            for st in entry
+                .statistics
+                .iter()
+                .filter(|st| st.league.id == Some(i64::from(league_id)))
+                .filter(|st| st.games.appearences.unwrap_or(0) > 0)
+            {
+                let team_id: Option<i32> = sqlx::query_scalar(
+                    "select team_id from team_alias where source = $1 and source_key = $2",
+                )
+                .bind(SOURCE)
+                .bind(st.team.id.to_string())
+                .fetch_optional(&mut *tx)
+                .await?;
+                let Some(team_id) = team_id else {
+                    unknown_team += 1;
+                    continue;
+                };
+                let player_id = upsert_player(
+                    &mut tx,
+                    &ApiPlayer {
+                        id: entry.player.id,
+                        name: entry.player.name.clone(),
+                        age: entry.player.age,
+                        number: None,
+                        position: st.games.position.clone(),
+                        photo: entry.player.photo.clone(),
+                    },
+                )
+                .await?;
+                sqlx::query(
+                    "insert into player_season_stats
+                         (player_id, season_id, team_id, appearances, minutes, goals, assists, yellow, red, rating)
+                     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                     on conflict (player_id, season_id, team_id) do update set
+                         appearances = excluded.appearances, minutes = excluded.minutes,
+                         goals = excluded.goals, assists = excluded.assists,
+                         yellow = excluded.yellow, red = excluded.red, rating = excluded.rating",
+                )
+                .bind(player_id)
+                .bind(season_id)
+                .bind(team_id)
+                .bind(st.games.appearences)
+                .bind(st.games.minutes)
+                .bind(st.goals.total.unwrap_or(0))
+                .bind(st.goals.assists.unwrap_or(0))
+                .bind(st.cards.yellow.unwrap_or(0))
+                // A second yellow is a sending-off: count it as a red.
+                .bind(st.cards.red.unwrap_or(0) + st.cards.yellowred.unwrap_or(0))
+                .bind(parse_rating(st.games.rating.as_deref()))
+                .execute(&mut *tx)
+                .await?;
+                loaded += 1;
+            }
+        }
+        tx.commit().await?;
+        if unknown_team > 0 {
+            tracing::warn!(file = %name, unknown_team, "stat lines for teams we don't have, skipped");
+        }
+        rows += loaded;
+    }
+    tracing::info!(rows, "player stats loaded");
     Ok(rows)
 }
 
@@ -329,6 +469,21 @@ fn parse_teams_filename(name: &str) -> Option<(u32, i16)> {
     Some((league.parse().ok()?, season.parse().ok()?))
 }
 
+/// `39_2024_p3.json` -> (39, 2024)
+fn parse_players_filename(name: &str) -> Option<(u32, i16)> {
+    let (rest, page) = name.strip_suffix(".json")?.rsplit_once("_p")?;
+    page.parse::<u32>().ok()?;
+    parse_teams_filename(&format!("{rest}.json"))
+}
+
+/// "7.233333" -> 7.23; anything outside 0-10 is treated as missing.
+fn parse_rating(s: Option<&str>) -> Option<f64> {
+    let r: f64 = s?.trim().parse().ok()?;
+    (0.0..=10.0)
+        .contains(&r)
+        .then(|| (r * 100.0).round() / 100.0)
+}
+
 /// 2024 -> "2024/25"
 fn season_label(start_year: i16) -> String {
     format!("{start_year}/{:02}", (start_year + 1) % 100)
@@ -396,6 +551,50 @@ mod tests {
         assert_eq!(parse_teams_filename("39.json"), None);
         assert_eq!(parse_teams_filename("x_2024.json"), None);
         assert_eq!(parse_teams_filename("39_2024.tmp"), None);
+    }
+
+    #[test]
+    fn players_filename_parsing() {
+        assert_eq!(parse_players_filename("39_2024_p1.json"), Some((39, 2024)));
+        assert_eq!(
+            parse_players_filename("179_2024_p12.json"),
+            Some((179, 2024))
+        );
+        assert_eq!(parse_players_filename("39_2024.json"), None);
+        assert_eq!(parse_players_filename("39_2024_px.json"), None);
+    }
+
+    #[test]
+    fn ratings() {
+        assert_eq!(parse_rating(Some("7.233333")), Some(7.23));
+        assert_eq!(parse_rating(Some("6.8")), Some(6.8));
+        assert_eq!(parse_rating(Some("")), None);
+        assert_eq!(parse_rating(Some("11")), None);
+        assert_eq!(parse_rating(None), None);
+    }
+
+    #[test]
+    fn parses_api_football_player_stats_shape() {
+        let page: Envelope<StatsEntry> = serde_json::from_str(
+            r#"{"paging":{"current":1,"total":38},"response":[{
+                "player":{"id":1100,"name":"E. Haaland","age":24,"photo":"p.png","birth":{"date":"2000-07-21"}},
+                "statistics":[
+                  {"team":{"id":50,"name":"Manchester City"},"league":{"id":39,"season":2024},
+                   "games":{"appearences":31,"lineups":31,"minutes":2725,"number":null,"position":"Attacker","rating":"7.2"},
+                   "goals":{"total":22,"assists":3,"conceded":0,"saves":null},
+                   "cards":{"yellow":2,"yellowred":0,"red":0}},
+                  {"team":{"id":50,"name":"Manchester City"},"league":{"id":45,"season":2024},
+                   "games":{"appearences":null,"minutes":null,"position":"Attacker","rating":null},
+                   "goals":{"total":null,"assists":null},
+                   "cards":{"yellow":null,"yellowred":null,"red":null}}]}]}"#,
+        )
+        .unwrap();
+        let e = &page.response[0];
+        assert_eq!(e.player.id, 1100);
+        assert_eq!(e.statistics[0].games.appearences, Some(31));
+        assert_eq!(e.statistics[0].goals.total, Some(22));
+        assert_eq!(e.statistics[1].league.id, Some(45));
+        assert_eq!(e.statistics[1].games.appearences, None);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 [Unit]
-Description=Football stats worker (refresh queue poller + admin API)
+Description=Football stats worker (refresh queue poller)
 Wants=network-online.target
 After=network-online.target
 

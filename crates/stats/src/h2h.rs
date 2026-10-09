@@ -1,4 +1,5 @@
-//! Head-to-head summary between team A and team B.
+//! Head-to-head summary between team A and team B. With A = one team and B =
+//! each opponent, the same summary is that team's goals markets.
 //!
 //! Each meeting is passed in already oriented from A's point of view
 //! (`a` = team A's side whether A was home or away). Optional match stats
@@ -70,6 +71,10 @@ pub struct Summary {
     pub over_1_5: usize,
     pub over_2_5: usize,
     pub over_3_5: usize,
+    /// Meetings where B did not score (A kept a clean sheet).
+    pub a_clean_sheets: usize,
+    /// Meetings where A did not score.
+    pub a_failed_to_score: usize,
     /// Only stats with at least one meeting of data, in a fixed order.
     pub stats: Vec<StatAverage>,
 }
@@ -116,6 +121,8 @@ pub fn summarize(meetings: &[Meeting]) -> Summary {
         over_1_5: count(&|m| m.total_goals() > 1),
         over_2_5: count(&|m| m.total_goals() > 2),
         over_3_5: count(&|m| m.total_goals() > 3),
+        a_clean_sheets: count(&|m| m.b.goals == 0),
+        a_failed_to_score: count(&|m| m.a.goals == 0),
         stats: STATS
             .iter()
             .filter_map(|(label, get)| stat_average(label, *get, meetings))
@@ -186,6 +193,7 @@ mod tests {
         assert_eq!(s.over_1_5, 3);
         assert_eq!(s.over_2_5, 3);
         assert_eq!(s.over_3_5, 2);
+        assert_eq!((s.a_clean_sheets, s.a_failed_to_score), (1, 1));
         assert_eq!(s.avg_goals(), 2.75);
         assert_eq!(s.pct(s.btts), 75.0);
     }

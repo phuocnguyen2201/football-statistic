@@ -15,6 +15,6 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "fs", "signal", "sync"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "fs", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

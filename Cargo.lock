@@ -1974,7 +1974,6 @@ dependencies = [
  "askama",
  "axum",
  "dotenvy",
- "reqwest",
  "serde",
  "sqlx",
  "stats",
@@ -2199,7 +2198,6 @@ name = "worker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "axum",
  "dotenvy",
  "reqwest",
  "serde",

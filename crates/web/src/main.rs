@@ -2,6 +2,9 @@
 //! button that queues a `refresh_request` row. Connects as `web_reader`.
 
 mod h2h;
+mod matches;
+mod players;
+mod team_stats;
 
 use std::sync::Arc;
 
@@ -18,54 +21,6 @@ use sqlx::PgPool;
 #[derive(Clone)]
 struct AppState {
     pool: PgPool,
-    pi: Option<PiAdmin>,
-}
-
-/// The Pi worker's admin API behind Cloudflare Tunnel + Access (optional:
-/// without it the Pi still picks up queued requests within 60s).
-#[derive(Clone)]
-struct PiAdmin {
-    http: reqwest::Client,
-    url: String,
-    token: String,
-    access_id: String,
-    access_secret: String,
-}
-
-impl PiAdmin {
-    fn from_env() -> Option<Self> {
-        let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
-        Some(Self {
-            http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(5))
-                .build()
-                .ok()?,
-            url: var("PI_ADMIN_URL")?,
-            token: var("WORKER_ADMIN_TOKEN")?,
-            access_id: var("CF_ACCESS_CLIENT_ID")?,
-            access_secret: var("CF_ACCESS_CLIENT_SECRET")?,
-        })
-    }
-
-    /// Fire and forget: the queued row is the source of truth.
-    fn wake(&self) {
-        let pi = self.clone();
-        tokio::spawn(async move {
-            let res = pi
-                .http
-                .post(format!("{}/refresh", pi.url.trim_end_matches('/')))
-                .bearer_auth(&pi.token)
-                .header("CF-Access-Client-Id", &pi.access_id)
-                .header("CF-Access-Client-Secret", &pi.access_secret)
-                .send()
-                .await;
-            match res {
-                Ok(r) if r.status().is_success() => {}
-                Ok(r) => tracing::warn!(status = %r.status(), "Pi admin API refused the wake-up"),
-                Err(e) => tracing::warn!(error = %e, "Pi admin API unreachable; it will poll"),
-            }
-        });
-    }
 }
 
 #[tokio::main]
@@ -85,7 +40,12 @@ async fn main() -> anyhow::Result<()> {
         .max_connections(5)
         .connect(&url)
         .await?;
-    let bind = std::env::var("BIND").unwrap_or_else(|_| "127.0.0.1:3000".into());
+    // Hosting platforms (Render, Fly, Railway, ...) set PORT and need 0.0.0.0.
+    let bind = match (std::env::var("BIND"), std::env::var("PORT")) {
+        (Ok(bind), _) => bind,
+        (_, Ok(port)) => format!("0.0.0.0:{port}"),
+        _ => "127.0.0.1:3000".into(),
+    };
 
     let app = Router::new()
         .route("/", get(index))
@@ -93,10 +53,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/team/{id}", get(team))
         .route("/h2h", get(h2h::page))
         .route("/refresh", post(refresh))
-        .with_state(Arc::new(AppState {
-            pool,
-            pi: PiAdmin::from_env(),
-        }));
+        .with_state(Arc::new(AppState { pool }));
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     tracing::info!("listening on http://{bind}");
@@ -188,11 +145,75 @@ struct TeamListRow {
     players: i64,
 }
 
+struct StandingRow {
+    pos: usize,
+    team_id: i32,
+    name: String,
+    logo_url: Option<String>,
+    played: u32,
+    won: u32,
+    drawn: u32,
+    lost: u32,
+    goals_for: u32,
+    goals_against: u32,
+    goal_difference: String,
+    points: u32,
+    /// Newest first: "W" / "D" / "L".
+    recent: Vec<&'static str>,
+}
+
 #[derive(Template)]
 #[template(path = "league.html")]
 struct LeaguePage {
     competition: CompetitionRow,
     teams: Vec<TeamListRow>,
+    /// Empty for cups and before the first match.
+    table: Vec<StandingRow>,
+    leaders: Option<players::Leaders>,
+}
+
+/// League table for `teams` (sorted by name, which breaks remaining ties).
+fn standings(teams: &[TeamListRow], results: &[(i32, i32, i16, i16)]) -> Vec<StandingRow> {
+    let ids: Vec<i32> = teams.iter().map(|t| t.id).collect();
+    let played: Vec<stats::standings::Played> = results
+        .iter()
+        .map(
+            |&(home, away, home_goals, away_goals)| stats::standings::Played {
+                home,
+                away,
+                home_goals,
+                away_goals,
+            },
+        )
+        .collect();
+    let rows = stats::standings::table(&ids, &played);
+    if rows.iter().all(|r| r.played == 0) {
+        return Vec::new();
+    }
+    rows.into_iter()
+        .enumerate()
+        .filter_map(|(i, r)| {
+            let t = teams.iter().find(|t| t.id == r.team)?;
+            Some(StandingRow {
+                pos: i + 1,
+                team_id: r.team,
+                name: t.name.clone(),
+                logo_url: t.logo_url.clone(),
+                played: r.played,
+                won: r.won,
+                drawn: r.drawn,
+                lost: r.lost,
+                goals_for: r.goals_for,
+                goals_against: r.goals_against,
+                goal_difference: match r.goal_difference() {
+                    0 => "0".into(),
+                    gd => format!("{gd:+}"),
+                },
+                points: r.points,
+                recent: r.recent.iter().map(|o| matches::letter(*o)).collect(),
+            })
+        })
+        .collect()
 }
 
 async fn league(State(st): State<Arc<AppState>>, Path(code): Path<String>) -> Page {
@@ -225,7 +246,34 @@ async fn league(State(st): State<Arc<AppState>>, Path(code): Path<String>) -> Pa
         }
         None => Vec::new(),
     };
-    Ok(Html(LeaguePage { competition, teams }.render()?))
+
+    // Cups have stages, not a table.
+    let table = match competition.season_id {
+        Some(season_id) if code != "CL" => {
+            let results: Vec<(i32, i32, i16, i16)> = sqlx::query_as(
+                "select home_team_id, away_team_id, ft_home, ft_away
+                 from match
+                 where season_id = $1 and status = 'finished'
+                   and ft_home is not null and ft_away is not null
+                 order by kickoff_utc",
+            )
+            .bind(season_id)
+            .fetch_all(&st.pool)
+            .await?;
+            standings(&teams, &results)
+        }
+        _ => Vec::new(),
+    };
+    let leaders = players::leaders(&st.pool, &code).await?;
+    Ok(Html(
+        LeaguePage {
+            competition,
+            teams,
+            table,
+            leaders,
+        }
+        .render()?,
+    ))
 }
 
 #[derive(sqlx::FromRow)]
@@ -254,6 +302,8 @@ struct TeamPage {
     id: i32,
     team: TeamRow,
     groups: Vec<(String, Vec<SquadRow>)>,
+    stats: Option<team_stats::TeamStats>,
+    players: Vec<players::PlayerStatRow>,
 }
 
 async fn team(State(st): State<Arc<AppState>>, Path(id): Path<i32>) -> Page {
@@ -279,11 +329,23 @@ async fn team(State(st): State<Arc<AppState>>, Path(id): Path<i32>) -> Page {
     .bind(id)
     .fetch_all(&st.pool)
     .await?;
+
+    let rows = sqlx::query_as::<_, matches::MatchRow>(&format!(
+        "{}
+         and (m.home_team_id = $1 or m.away_team_id = $1)
+         order by m.kickoff_utc desc",
+        matches::FINISHED
+    ))
+    .bind(id)
+    .fetch_all(&st.pool)
+    .await?;
     Ok(Html(
         TeamPage {
             id,
             team,
             groups: group_by_position(squad),
+            stats: team_stats::build(id, &rows),
+            players: players::for_team(&st.pool, id).await?,
         }
         .render()?,
     ))
@@ -332,10 +394,7 @@ async fn refresh(
         )
         .fetch_one(&st.pool)
         .await?;
-        if let Some(pi) = &st.pi {
-            pi.wake();
-        }
-        format!("Refresh queued (#{id}).")
+        format!("Refresh queued (#{id}). The data updates within a few minutes.")
     };
     Ok(Html(RefreshFragment { message }.render()?).into_response())
 }
@@ -402,6 +461,8 @@ mod tests {
                 venue_capacity: Some(14223),
             },
             groups: group_by_position(vec![row("J. Walton", Some("Goalkeeper"))]),
+            stats: None,
+            players: vec![],
         }
         .render()
         .unwrap();
@@ -420,6 +481,8 @@ mod tests {
                 season_label: None,
             },
             teams: vec![],
+            table: vec![],
+            leaders: None,
         }
         .render()
         .unwrap();

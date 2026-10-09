@@ -4,6 +4,68 @@
 <p><a href="/">← All leagues</a></p>
 <h1>{{ competition.name }}</h1>
 <p class="muted">{{ competition.country }}{% if let Some(s) = competition.season_label %} · {{ s }} season{% endif %}</p>
+{% if !table.is_empty() %}
+<h2>Table</h2>
+<div class="scroll">
+<table class="standings">
+  <thead>
+    <tr>
+      <th scope="col">#</th><th scope="col">Team</th>
+      <th scope="col"><abbr title="Played">P</abbr></th><th scope="col"><abbr title="Won">W</abbr></th>
+      <th scope="col"><abbr title="Drawn">D</abbr></th><th scope="col"><abbr title="Lost">L</abbr></th>
+      <th scope="col"><abbr title="Goals for">GF</abbr></th><th scope="col"><abbr title="Goals against">GA</abbr></th>
+      <th scope="col"><abbr title="Goal difference">GD</abbr></th><th scope="col"><abbr title="Points">Pts</abbr></th>
+      <th scope="col">Last 5</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in table %}
+    <tr>
+      <td class="num">{{ r.pos }}</td>
+      <td class="nowrap"><a href="/team/{{ r.team_id }}">{% if let Some(logo) = r.logo_url %}<img src="{{ logo }}" alt="" loading="lazy">{% endif %}{{ r.name }}</a></td>
+      <td class="num">{{ r.played }}</td><td class="num">{{ r.won }}</td><td class="num">{{ r.drawn }}</td><td class="num">{{ r.lost }}</td>
+      <td class="num">{{ r.goals_for }}</td><td class="num">{{ r.goals_against }}</td><td class="num">{{ r.goal_difference }}</td>
+      <td class="num"><strong>{{ r.points }}</strong></td>
+      <td class="nowrap">{% for x in r.recent %}<span class="badge {{ x }}">{{ x }}</span> {% endfor %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted">Ties are split by goal difference, then goals scored. Last 5: newest first.</p>
+{% endif %}
+
+{% if let Some(l) = leaders %}
+<h2>Top players {{ l.season }}</h2>
+<p class="muted">League matches only. Player stats come from the {{ l.season }} season, the latest our data plan allows.</p>
+<div class="two-col">
+  <div>
+    <h3>Goals</h3>
+    <table>
+      <thead><tr><th scope="col">#</th><th scope="col">Player</th><th scope="col">Team</th><th scope="col">Goals</th><th scope="col"><abbr title="Appearances">Apps</abbr></th></tr></thead>
+      <tbody>
+        {% for r in l.scorers %}
+        <tr><td class="num">{{ loop.index }}</td><td>{{ r.name }}</td><td class="nowrap"><a href="/team/{{ r.team_id }}">{{ r.team }}</a></td><td class="num"><strong>{{ r.goals.unwrap_or(0) }}</strong></td><td class="num">{% if let Some(a) = r.appearances %}{{ a }}{% endif %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <h3>Assists</h3>
+    <table>
+      <thead><tr><th scope="col">#</th><th scope="col">Player</th><th scope="col">Team</th><th scope="col">Assists</th><th scope="col"><abbr title="Appearances">Apps</abbr></th></tr></thead>
+      <tbody>
+        {% for r in l.assists %}
+        <tr><td class="num">{{ loop.index }}</td><td>{{ r.name }}</td><td class="nowrap"><a href="/team/{{ r.team_id }}">{{ r.team }}</a></td><td class="num"><strong>{{ r.assists.unwrap_or(0) }}</strong></td><td class="num">{% if let Some(a) = r.appearances %}{{ a }}{% endif %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if !table.is_empty() || leaders.is_some() %}<h2>Clubs</h2>{% endif %}
+
 {% if teams.is_empty() %}
 <p>No teams loaded yet.</p>
 {% else %}

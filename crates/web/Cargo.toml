@@ -10,7 +10,6 @@ anyhow.workspace = true
 askama.workspace = true
 axum.workspace = true
 dotenvy.workspace = true
-reqwest.workspace = true
 serde.workspace = true
 sqlx.workspace = true
 tokio.workspace = true

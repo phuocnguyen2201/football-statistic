@@ -3,11 +3,10 @@ name = "worker"
 version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
-description = "Raspberry Pi worker: refresh_request queue, scheduled refreshes, admin API"
+description = "Raspberry Pi worker: refresh_request queue poller and scheduled refreshes"
 
 [dependencies]
 anyhow.workspace = true
-axum.workspace = true
 dotenvy.workspace = true
 reqwest.workspace = true
 serde.workspace = true

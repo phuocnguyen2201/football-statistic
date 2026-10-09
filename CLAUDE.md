@@ -25,9 +25,9 @@ probabilities). Informational only, not a bookmaker.
 ## Data flow
 One-time backfill into Supabase. Then twice a week (Mon + Fri 01:00, explicit
 timezone) a worker on a Raspberry Pi fetches only new data and upserts.
-Manual "Refresh now" button: inserts a row in refresh_request (source of truth)
-and also calls the Pi admin API through Cloudflare Tunnel + Access; Pi also polls
-for pending rows every 60s. Lock prevents overlapping runs.
+Manual "Refresh now" button: inserts a row in refresh_request; the Pi polls for
+pending rows every 60s (no inbound connection to the Pi). Lock prevents
+overlapping runs. The website is hosted anywhere and only reads Supabase.
 Pi access: Tailscale (SSH, health). systemd timer with Persistent=true.
 
 ## Rules
@@ -44,6 +44,6 @@ Pi access: Tailscale (SSH, health). systemd timer with Persistent=true.
 1 Workspace, Supabase migrations, CSV backfill, team_alias
 2 stats crate (form, H2H, goals markets, streaks, standings)
 3 Player importer (API-Football) + player_alias
-4 Worker: refresh_request queue, Mon/Fri timer, admin API, Pi deploy docs
+4 Worker: refresh_request queue, Mon/Fri timer, Pi deploy docs
 5 Web site, Cloudflare caching and cache purge after runs
 6 Poisson + Elo models and backtests
