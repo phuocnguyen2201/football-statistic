@@ -6,7 +6,7 @@ stats (form, H2H, over/under, BTTS, corners, cards, player stats, Poisson/Elo
 probabilities). Informational only, not a bookmaker.
 
 ## Stack
-- Rust workspace: crates domain, db, ingest, stats, web, worker
+- Rust workspace: crates probe, ingest, stats, web, worker (docs: docs/crates.md, docs/supabase.md)
 - Axum + Tokio, SQLx, Askama + HTMX (server-rendered)
 - Database: Supabase Postgres (use session-mode/direct connection with SQLx;
   transaction-pooler port 6543 breaks prepared statements)
